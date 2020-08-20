@@ -8,15 +8,41 @@
      * [Mach XO3D](http://www.latticesemi.com/view_document?document_id=52704)
 """
 
+from nmigen import Elaboratable, Instance, Module, Signal
 from nmigen.hdl import ir
+from nmigen_soc import wishbone
 
 class PhaseLockLoop:
     pass
 #     input wire [8:0] pll0_bus_i;
 #     output wire [16:0] pll0_bus_o;
 
-class InterIntegratedCircuit:
-    pass
+class InterIntegratedCircuit(Elaboratable):
+    def __init__(self, scl=None, sda=None, address_window=None):
+        self._sda = sda
+        self._sdai = Signal()
+        self._sdao = Signal()
+        self._sdaoen = Signal()
+
+        self._scl = scl
+        self._scli = Signal()
+        self._sclo = Signal()
+        self._scloen = Signal()
+
+        self.kwargs = {
+            "i_I2C{}SDAI": self._sdai,
+            "o_I2C{}SDAO": self._sdao,
+            "o_I2C{}SDAOEN": self._sdaoen,
+            "i_I2C{}SCLI": self._scli,
+            "o_I2C{}SCLO": self._sclo,
+            "o_I2C{}SCLOEN": self._scloen,
+        }
+
+    def elaborate(self, platform):
+        m = Module()
+        m.submodules.sda = ir.Instance("BB", i_I=self._sdai, i_T=self._sdaoen, i_O=self._sdao, o_B=self._sda)
+        m.submodules.scl = ir.Instance("BB", i_I=self._scli, i_T=self._scloen, i_O=self._sclo, o_B=self._scl)
+        return m
 #     output wire i2c1_irqo;
 #     inout wire i2c1_scl;
 #     inout wire i2c1_sda;
@@ -110,9 +136,9 @@ class FlashMemory:
 #     input wire ufm_sn;
 #     output wire wbc_ufm_irq;
 
-class EmbeddedFunctionBlock(ir.Instance):
+class EmbeddedFunctionBlock(Elaboratable):
     """This block of the FPGA includes a number of peripherals connected via an 8-bit Wishbone bus."""
-    def __init__(self, address_window):
+    def __init__(self, address_window=None, clock=None):
         if isinstance(address_window, wishbone.Interface):
             args = []
             print("bus!")
@@ -125,16 +151,65 @@ class EmbeddedFunctionBlock(ir.Instance):
             #     input wire [7:0] wb_dat_i;
             #     output wire [7:0] wb_dat_o;
             #     output wire wb_ack_o;
-            super().__init__("EFB", *args)
+            # super().__init__("EFB", *args)
 
-        self.pll0 = PLL(address_window[0x00:0x20])
-        self.pll1 = PLL(address_window[0x20:0x40])
+        # Internal power signals to tie to.
+        self._high = Signal()
+        self._low = Signal()
+
+        self.i2c1_scl = Signal()
+        self.i2c1_sda = Signal()
+
+        self._kwargs = {}
+
+        if address_window is None:
+            self._clock = clock
+
+            # We aren't handed a wishbone bus so tie everything off.
+            for i in range(8):
+                self._kwargs["i_WBDATI%d" % i] = self._low
+            for i in range(8):
+                self._kwargs["i_WBADRI%d" % i] = self._low
+            self._kwargs["i_WBSTBI"] = self._low
+            self._kwargs["i_WBWEI"] = self._low
+            self._kwargs["i_WBRSTI"] = self._low
+            self._kwargs["i_WBCYCI"] = self._low
+            self._freq = "3.02"
+            self.primary_i2c = InterIntegratedCircuit(self.i2c1_scl, self.i2c1_sda)
+            return
+
+        self.pll0 = PhaseLockLoop(address_window[0x00:0x20])
+        self.pll1 = PhaseLockLoop(address_window[0x20:0x40])
         self.primary_i2c = I2C(address_window[0x40:0x4a])
         self.secondary_i2c = I2C(address_window[0x4a:0x54])
         self.spi = SPI(address_window[0x54:0x5e])
         self.timer_counter = TimerCounter(address_window[0x5e:0x70])
         self.flash_memory = FlashMemory(address_window[0x70:0x76])
         self.interrupt_source = InterruptSource(address_window[0x76:0x78])
+
+    def elaborate(self, platform):
+        m = Module()
+        m.submodules.high = ir.Instance("VHI", o_Z=self._high)
+        m.submodules.low = ir.Instance("VLO", o_Z=self._low)
+        m.submodules.i2c1 = self.primary_i2c
+        i2c1_kwargs = {}
+        for k in self.primary_i2c.kwargs:
+            i2c1_kwargs[k.format(1)] = self.primary_i2c.kwargs[k]
+        m.submodules.efb = ir.Instance("EFB",
+                                       i_WBCLKI=self._clock,
+                                       p_EFB_WB_CLK_FREQ=self._freq,
+                                       p_EFB_I2C1="ENABLED",
+                                       p_GSR="ENABLED",
+                                       p_I2C1_WAKEUP="DISABLED",
+                                       p_I2C1_GEN_CALL="DISABLED",
+                                       p_I2C1_CLK_DIVIDER=8,
+                                       p_I2C1_BUS_PERF="100kHz",
+                                       p_I2C1_SLAVE_ADDR="0b1000001",
+                                       p_I2C1_ADDRESSING="7BIT",
+                                       **i2c1_kwargs,
+                                       **self._kwargs)
+        print("EFB instance!")
+        return m
 
 #     wire scuba_vlo;
 
