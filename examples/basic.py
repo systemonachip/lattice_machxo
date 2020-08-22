@@ -1,7 +1,7 @@
 import itertools
 
-from nmigen import Cat, Elaboratable, Module, Signal
-from nmigen.build import ResourceError
+from nmigen import Cat, ClockDomain, ClockSignal, Elaboratable, Module, Signal
+from nmigen.build import Attrs, Pins, Resource, ResourceError
 from nmigen_boards.machxo3_sk import MachXO3SKPlatform
 
 from lattice_machxo.internal_oscillator import InternalOscillator
@@ -33,22 +33,24 @@ class Blinky(Elaboratable):
         return m
 
 class BaseMach(Elaboratable):
-    def __init__(self, clock=None):
+    def __init__(self, scl, sda, clock=None):
         if clock:
             self._clock = clock
         else:
             self._clock = InternalOscillator()
-        self.efb = EmbeddedFunctionBlock(clock=self._clock.out)
+        self.efb = EmbeddedFunctionBlock(clock=self._clock.out, scl=scl, sda=sda)
 
     def elaborate(self, platform):
         m = Module()
         m.submodules.clock = self._clock
         m.submodules.efb = self.efb
+        m.domains += ClockDomain("sync")
+        m.d.comb += ClockSignal("sync").eq(self._clock.out)
         return m
 
 class BlinkySystem(BaseMach):
-    def __init__(self, leds, switches):
-        super().__init__()
+    def __init__(self, leds, switches, scl, sda):
+        super().__init__(scl, sda)
 
         self.blinky = Blinky(3020000, leds, switches)
 
@@ -72,6 +74,9 @@ if __name__ == "__main__":
 
     leds     = [res.o for res in get_all_resources("led")]
 
+    platform.add_resources([Resource("sda", 0, Pins("C9", dir="io"), Attrs(IO_TYPE="LVCMOS33"))])
+    platform.add_resources([Resource("scl", 0, Pins("A9", dir="io"), Attrs(IO_TYPE="LVCMOS33"))])
+
     # Treat each part of the RGB LEDs separately.
     rgb_leds = [res for res in get_all_resources("rgb_led")]
     leds.extend([led.r.o for led in rgb_leds])
@@ -81,5 +86,9 @@ if __name__ == "__main__":
     switches = [res.i for res in get_all_resources("switch")]
     switches.extend((res.i for res in get_all_resources("button")))
 
-    b = BlinkySystem(leds, switches)
+    # c = platform.request("j", 3)
+    # print(c)
+    sda = platform.request("sda")
+    scl = platform.request("scl")
+    b = BlinkySystem(leds[:4], switches, scl, sda)
     platform.build(b)

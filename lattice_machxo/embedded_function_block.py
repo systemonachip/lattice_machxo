@@ -17,32 +17,19 @@ class PhaseLockLoop:
 #     input wire [8:0] pll0_bus_i;
 #     output wire [16:0] pll0_bus_o;
 
-class InterIntegratedCircuit(Elaboratable):
+class InterIntegratedCircuit:
     def __init__(self, scl=None, sda=None, address_window=None):
-        self._sda = sda
-        self._sdai = Signal()
-        self._sdao = Signal()
-        self._sdaoen = Signal()
-
-        self._scl = scl
-        self._scli = Signal()
-        self._sclo = Signal()
-        self._scloen = Signal()
+        print(dir(scl), type(scl))
 
         self.kwargs = {
-            "i_I2C{}SDAI": self._sdai,
-            "o_I2C{}SDAO": self._sdao,
-            "o_I2C{}SDAOEN": self._sdaoen,
-            "i_I2C{}SCLI": self._scli,
-            "o_I2C{}SCLO": self._sclo,
-            "o_I2C{}SCLOEN": self._scloen,
+            "i_I2C{}SDAI": sda.i,
+            "o_I2C{}SDAO": sda.o,
+            "o_I2C{}SDAOEN": sda.oe,
+            "i_I2C{}SCLI": scl.i,
+            "o_I2C{}SCLO": scl.o,
+            "o_I2C{}SCLOEN": scl.oe,
         }
 
-    def elaborate(self, platform):
-        m = Module()
-        m.submodules.sda = ir.Instance("BB", i_I=self._sdai, i_T=self._sdaoen, i_O=self._sdao, o_B=self._sda)
-        m.submodules.scl = ir.Instance("BB", i_I=self._scli, i_T=self._scloen, i_O=self._sclo, o_B=self._scl)
-        return m
 #     output wire i2c1_irqo;
 #     inout wire i2c1_scl;
 #     inout wire i2c1_sda;
@@ -138,7 +125,7 @@ class FlashMemory:
 
 class EmbeddedFunctionBlock(Elaboratable):
     """This block of the FPGA includes a number of peripherals connected via an 8-bit Wishbone bus."""
-    def __init__(self, address_window=None, clock=None):
+    def __init__(self, address_window=None, clock=None, scl=None, sda=None):
         if isinstance(address_window, wishbone.Interface):
             args = []
             print("bus!")
@@ -157,8 +144,8 @@ class EmbeddedFunctionBlock(Elaboratable):
         self._high = Signal()
         self._low = Signal()
 
-        self.i2c1_scl = Signal()
-        self.i2c1_sda = Signal()
+        self.i2c1_scl = scl
+        self.i2c1_sda = sda
 
         self._kwargs = {}
 
@@ -174,6 +161,7 @@ class EmbeddedFunctionBlock(Elaboratable):
             self._kwargs["i_WBWEI"] = self._low
             self._kwargs["i_WBRSTI"] = self._low
             self._kwargs["i_WBCYCI"] = self._low
+            self._kwargs["i_UFMSN"] = self._high
             self._freq = "3.02"
             self.primary_i2c = InterIntegratedCircuit(self.i2c1_scl, self.i2c1_sda)
             return
@@ -191,7 +179,6 @@ class EmbeddedFunctionBlock(Elaboratable):
         m = Module()
         m.submodules.high = ir.Instance("VHI", o_Z=self._high)
         m.submodules.low = ir.Instance("VLO", o_Z=self._low)
-        m.submodules.i2c1 = self.primary_i2c
         i2c1_kwargs = {}
         for k in self.primary_i2c.kwargs:
             i2c1_kwargs[k.format(1)] = self.primary_i2c.kwargs[k]
@@ -200,6 +187,13 @@ class EmbeddedFunctionBlock(Elaboratable):
                                        p_EFB_WB_CLK_FREQ=self._freq,
                                        p_EFB_I2C1="ENABLED",
                                        p_GSR="ENABLED",
+                                       p_UFM_INIT_FILE_FORMAT = "HEX",
+                                       p_UFM_INIT_FILE_NAME = "NONE",
+                                       p_UFM_INIT_ALL_ZEROS = "ENABLED",
+                                       p_UFM_INIT_START_PAGE = 2038,
+                                       p_UFM_INIT_PAGES = 8,
+                                       p_DEV_DENSITY = "7000L",
+                                       p_EFB_UFM = "ENABLED",
                                        p_I2C1_WAKEUP="DISABLED",
                                        p_I2C1_GEN_CALL="DISABLED",
                                        p_I2C1_CLK_DIVIDER=8,

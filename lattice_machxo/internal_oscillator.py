@@ -24,7 +24,7 @@ class InternalOscillator(Elaboratable):
         if period and not frequency:
             frequency = self.nearest_freq(period)
         if frequency is None:
-            frequency = 3.02
+            frequency = 3.17
         self._freq_str = "{:.2f}".format(frequency)
         self.out = Signal()
         """Clock signal out."""
