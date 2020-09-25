@@ -125,7 +125,7 @@ class FlashMemory:
 
 class EmbeddedFunctionBlock(Elaboratable):
     """This block of the FPGA includes a number of peripherals connected via an 8-bit Wishbone bus."""
-    def __init__(self, address_window=None, clock=None, scl=None, sda=None):
+    def __init__(self, address_window=None, clock=None, scl=None, sda=None, scl2=None, sda2=None):
         if isinstance(address_window, wishbone.Interface):
             args = []
             print("bus!")
@@ -164,6 +164,7 @@ class EmbeddedFunctionBlock(Elaboratable):
             self._kwargs["i_UFMSN"] = self._high
             self._freq = "3.02"
             self.primary_i2c = InterIntegratedCircuit(self.i2c1_scl, self.i2c1_sda)
+            self.secondary_i2c = InterIntegratedCircuit(scl2, sda2)
             return
 
         self.pll0 = PhaseLockLoop(address_window[0x00:0x20])
@@ -182,10 +183,13 @@ class EmbeddedFunctionBlock(Elaboratable):
         i2c1_kwargs = {}
         for k in self.primary_i2c.kwargs:
             i2c1_kwargs[k.format(1)] = self.primary_i2c.kwargs[k]
+        for k in self.secondary_i2c.kwargs:
+            i2c1_kwargs[k.format(2)] = self.secondary_i2c.kwargs[k]
         m.submodules.efb = ir.Instance("EFB",
                                        i_WBCLKI=self._clock,
                                        p_EFB_WB_CLK_FREQ=self._freq,
                                        p_EFB_I2C1="ENABLED",
+                                       p_EFB_I2C2="ENABLED",
                                        p_GSR="ENABLED",
                                        p_UFM_INIT_FILE_FORMAT = "HEX",
                                        p_UFM_INIT_FILE_NAME = "NONE",
@@ -200,6 +204,12 @@ class EmbeddedFunctionBlock(Elaboratable):
                                        p_I2C1_BUS_PERF="100kHz",
                                        p_I2C1_SLAVE_ADDR="0b1000001",
                                        p_I2C1_ADDRESSING="7BIT",
+                                       p_I2C2_WAKEUP="DISABLED",
+                                       p_I2C2_GEN_CALL="DISABLED",
+                                       p_I2C2_CLK_DIVIDER=8,
+                                       p_I2C2_BUS_PERF="100kHz",
+                                       p_I2C2_SLAVE_ADDR="0b1000010",
+                                       p_I2C2_ADDRESSING="7BIT",
                                        **i2c1_kwargs,
                                        **self._kwargs)
         print("EFB instance!")
